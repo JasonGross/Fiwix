@@ -18,7 +18,24 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 	-o "$temporary/runtime.elf" "$temporary/runtime.o" \
 	"$temporary/generic-trap.o"
 
+# The gate's pass/fail is qemu's exit code alone. Capture qemu's stdout+stderr
+# and exit code instead of discarding them (the previous `>/dev/null 2>&1`):
+# that discard made every failure blind, so an intermittent one was
+# undiagnosable by construction. On a non-zero exit, print the captured output
+# and the code to stderr before failing, so the next occurrence self-diagnoses.
+qemu_log="$temporary/qemu.log"
+rc=0
 timeout "$TIMEOUT" "$QEMU" -machine virt -m 256M -smp 1 -nographic \
-	-bios none -kernel "$temporary/runtime.elf" -no-reboot >/dev/null 2>&1
+	-bios none -kernel "$temporary/runtime.elf" -no-reboot \
+	>"$qemu_log" 2>&1 || rc=$?
+
+if [ "$rc" -ne 0 ]; then
+	echo "Fiwix riscv64 generic trap runtime gate FAILED: qemu exited $rc" >&2
+	echo "  qemu=$QEMU timeout=${TIMEOUT}s kernel=$temporary/runtime.elf" >&2
+	echo "--- begin qemu stdout+stderr ---" >&2
+	cat "$qemu_log" >&2
+	echo "--- end qemu stdout+stderr ---" >&2
+	exit "$rc"
+fi
 
 echo "Fiwix riscv64 generic trap runtime gate passed"
